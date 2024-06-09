@@ -1,22 +1,7 @@
 #include "threadpool.h"
 
 #include <stdlib.h>
-
-enum
-{
-  THREADPOOL_OK,
-
-  THREADPOOL_MUTEX_INIT,
-  THREADPOOL_MUTEX_LOCK,
-  THREADPOOL_MUTEX_UNLOCK,
-
-  THREADPOOL_COND_INIT,
-  THREADPOOL_COND_WAIT,
-  THREADPOOL_COND_SIGNAL,
-
-  THREADPOOL_MALLOC,
-  THREADPOOL_THREAD_NEW,
-};
+#include <string.h>
 
 typedef struct threadpool_task_t threadpool_task_t;
 
@@ -30,7 +15,7 @@ struct threadpool_task_t
 static void *work (void *arg);
 
 int
-threadpool_init (threadpool_t *pool, int n)
+threadpool_init (threadpool_t *pool, size_t n)
 {
   if (0 != pthread_mutex_init (&pool->mtx, NULL))
     return THREADPOOL_MUTEX_INIT;
@@ -38,16 +23,11 @@ threadpool_init (threadpool_t *pool, int n)
   if (0 != pthread_cond_init (&pool->cond, NULL))
     return THREADPOOL_COND_INIT;
 
-  pool->stop = false;
-  pool->tasks = LIST_INIT;
-  pool->threads = ARRAY_INIT;
-  pool->threads.element = sizeof (pthread_t);
+  memset (pool, 0, sizeof (threadpool_t));
 
-  if (n <= 0)
-    n = THREADPOOL_THREADS;
-
-  int init = 0;
+  size_t init = 0;
   pthread_t *threads;
+  n = n ? n : THREADPOOL_THREADS;
 
   if (!(threads = malloc (n * sizeof (pthread_t))))
     return THREADPOOL_MALLOC;
@@ -56,13 +36,13 @@ threadpool_init (threadpool_t *pool, int n)
     if (0 != pthread_create (&threads[init], NULL, work, pool))
       goto err;
 
-  pool->threads.data = threads;
-  pool->threads.size = pool->threads.cap = n;
+  pool->size = n;
+  pool->threads = threads;
 
   return 0;
 
 err:
-  for (int i = 0; i < init; i++)
+  for (size_t i = 0; i < init; i++)
     pthread_cancel (threads[i]);
 
   free (threads);
@@ -70,32 +50,30 @@ err:
   return THREADPOOL_THREAD_NEW;
 }
 
-int
+void
 threadpool_free (threadpool_t *pool)
 {
   threadpool_stop (pool);
 
-  size_t nums = pool->threads.size;
-  pthread_t *threads = pool->threads.data;
+  size_t size = pool->size;
+  pthread_t *threads = pool->threads;
 
-  for (size_t i = 0; i < nums; i++)
+  for (size_t i = 0; i < size; i++)
     pthread_join (threads[i], NULL);
 
-  free (pool->threads.data);
-
-  return 0;
+  free (pool->threads);
 }
 
 int
-threadpool_post (threadpool_t *pool, threadpool_func_t *func, void *arg)
+threadpool_post (threadpool_t *pool, threadpool_func_t *f, void *a)
 {
   threadpool_task_t *task;
 
   if (!(task = malloc (sizeof (threadpool_task_t))))
     return THREADPOOL_MALLOC;
 
-  task->arg = arg;
-  task->func = func;
+  task->arg = a;
+  task->func = f;
 
   pthread_mutex_lock (&pool->mtx);
   list_push_back (&pool->tasks, &task->node);
@@ -106,14 +84,12 @@ threadpool_post (threadpool_t *pool, threadpool_func_t *func, void *arg)
   return 0;
 }
 
-int
+void
 threadpool_stop (threadpool_t *pool)
 {
   pthread_mutex_lock (&pool->mtx);
   pool->stop = true;
   pthread_mutex_unlock (&pool->mtx);
-
-  return 0;
 }
 
 static void *
