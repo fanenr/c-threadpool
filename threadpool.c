@@ -3,15 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct threadpool_task_t threadpool_task_t;
-
-struct threadpool_task_t
-{
-  void *arg;
-  list_node_t node;
-  threadpool_func_t *func;
-};
-
 static void *work (void *arg);
 
 void
@@ -40,7 +31,7 @@ threadpool_wait (threadpool_t *pool)
     {
       pthread_mutex_lock (&pool->mtx);
 
-      if (!pool->tasks.size)
+      if (!pool->remain)
         {
           pthread_mutex_unlock (&pool->mtx);
           break;
@@ -81,15 +72,18 @@ threadpool_quit (threadpool_t *pool)
 int
 threadpool_init (threadpool_t *pool, size_t n)
 {
+  pool->status = THREADPOOL_STS_RUN;
+
+  pool->size = 0;
+  pool->threads = NULL;
+
+  pool->remain = 0;
+  pool->head = pool->tail = NULL;
+
   if (0 != pthread_mutex_init (&pool->mtx, NULL))
     return THREADPOOL_ERR_MTX;
   if (0 != pthread_cond_init (&pool->cond, NULL))
     return THREADPOOL_ERR_CND;
-
-  pool->size = 0;
-  pool->threads = NULL;
-  pool->tasks = LIST_INIT;
-  pool->status = THREADPOOL_STS_RUN;
 
   size_t init = 0;
   pthread_t *threads;
@@ -126,6 +120,7 @@ threadpool_post (threadpool_t *pool, threadpool_func_t *f, void *a)
 
   task->arg = a;
   task->func = f;
+  task->next = NULL;
 
   pthread_mutex_lock (&pool->mtx);
 
@@ -136,7 +131,12 @@ threadpool_post (threadpool_t *pool, threadpool_func_t *f, void *a)
       return THREADPOOL_ERR_QUITTED;
     }
 
-  list_push_back (&pool->tasks, &task->node);
+  if (pool->tail)
+    pool->tail->next = task;
+  else
+    pool->head = task;
+  pool->tail = task;
+  pool->remain++;
 
   pthread_mutex_unlock (&pool->mtx);
   pthread_cond_signal (&pool->cond);
@@ -153,7 +153,7 @@ work (void *arg)
     {
       pthread_mutex_lock (&pool->mtx);
 
-      for (; (pool->status == THREADPOOL_STS_RUN && !pool->tasks.size)
+      for (; (pool->status == THREADPOOL_STS_RUN && !pool->head)
              || pool->status == THREADPOOL_STS_STOP;)
         pthread_cond_wait (&pool->cond, &pool->mtx);
 
@@ -163,15 +163,19 @@ work (void *arg)
           break;
         }
 
-      list_node_t *node = pool->tasks.head;
-      list_pop_front (&pool->tasks);
+      threadpool_task_t *task = pool->head;
+      pool->head = task->next;
+      if (task == pool->tail)
+        pool->tail = NULL;
 
       pthread_mutex_unlock (&pool->mtx);
 
-      threadpool_task_t *task = container_of (node, threadpool_task_t, node);
       task->func (task->arg);
-
       free (task);
+
+      pthread_mutex_lock (&pool->mtx);
+      pool->remain--;
+      pthread_mutex_unlock (&pool->mtx);
     }
 
   return NULL;

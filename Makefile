@@ -5,7 +5,7 @@ include config.mk
 .PHONY: all
 all: test
 
-test: test.o threadpool.o list.o
+test: test.o threadpool.o
 	gcc $(LDFLAGS) -o $@ $^
 
 %.o: %.c
