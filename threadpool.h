@@ -4,7 +4,6 @@
 #include "list.h"
 
 #include <pthread.h>
-#include <stdbool.h>
 
 #define THREADPOOL_THREADS 4
 

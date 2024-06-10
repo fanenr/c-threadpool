@@ -7,9 +7,9 @@ typedef struct threadpool_task_t threadpool_task_t;
 
 struct threadpool_task_t
 {
-  threadpool_func_t *func;
-  list_node_t node;
   void *arg;
+  list_node_t node;
+  threadpool_func_t *func;
 };
 
 static void *work (void *arg);
@@ -18,6 +18,7 @@ void
 threadpool_free (threadpool_t *pool)
 {
   threadpool_wait (pool);
+  threadpool_quit (pool);
 
   size_t size = pool->size;
   pthread_t *threads = pool->threads;
@@ -26,6 +27,10 @@ threadpool_free (threadpool_t *pool)
     pthread_join (threads[i], NULL);
 
   free (pool->threads);
+  pthread_mutex_destroy (&pool->mtx);
+  pthread_cond_destroy (&pool->cond);
+
+  memset (pool, 0, sizeof (threadpool_t));
 }
 
 void
@@ -38,7 +43,7 @@ threadpool_wait (threadpool_t *pool)
       if (!pool->tasks.size)
         {
           pthread_mutex_unlock (&pool->mtx);
-          return;
+          break;
         }
 
       pthread_mutex_unlock (&pool->mtx);
@@ -78,11 +83,13 @@ threadpool_init (threadpool_t *pool, size_t n)
 {
   if (0 != pthread_mutex_init (&pool->mtx, NULL))
     return THREADPOOL_ERR_MTX;
-
   if (0 != pthread_cond_init (&pool->cond, NULL))
     return THREADPOOL_ERR_CND;
 
-  memset (pool, 0, sizeof (threadpool_t));
+  pool->size = 0;
+  pool->threads = NULL;
+  pool->tasks = LIST_INIT;
+  pool->status = THREADPOOL_STS_RUN;
 
   size_t init = 0;
   pthread_t *threads;
@@ -153,7 +160,7 @@ work (void *arg)
       if (pool->status == THREADPOOL_STS_QUIT)
         {
           pthread_mutex_unlock (&pool->mtx);
-          return NULL;
+          break;
         }
 
       list_node_t *node = pool->tasks.head;
