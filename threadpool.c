@@ -27,19 +27,8 @@ threadpool_free (threadpool_t *pool)
 void
 threadpool_wait (threadpool_t *pool)
 {
-  for (;;)
-    {
-      pthread_mutex_lock (&pool->mtx);
-
-      if (!pool->remain)
-        {
-          pthread_mutex_unlock (&pool->mtx);
-          break;
-        }
-
-      pthread_mutex_unlock (&pool->mtx);
-      pthread_cond_broadcast (&pool->cond);
-    }
+  for (; __atomic_load_n (&pool->remain, __ATOMIC_ACQUIRE);)
+    ;
 }
 
 void
@@ -136,9 +125,11 @@ threadpool_post (threadpool_t *pool, threadpool_func_t *f, void *a)
   else
     pool->head = task;
   pool->tail = task;
-  pool->remain++;
 
   pthread_mutex_unlock (&pool->mtx);
+
+  __atomic_fetch_add (&pool->remain, 1, __ATOMIC_RELEASE);
+
   pthread_cond_signal (&pool->cond);
 
   return 0;
@@ -173,9 +164,7 @@ work (void *arg)
       task->func (task->arg);
       free (task);
 
-      pthread_mutex_lock (&pool->mtx);
-      pool->remain--;
-      pthread_mutex_unlock (&pool->mtx);
+      __atomic_fetch_sub (&pool->remain, 1, __ATOMIC_RELEASE);
     }
 
   return NULL;

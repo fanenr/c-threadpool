@@ -1,4 +1,4 @@
-MODE = debug
+MODE = release
 
 include config.mk
 
