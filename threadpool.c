@@ -1,7 +1,6 @@
 #include "threadpool.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 static void *work (void *arg);
 
@@ -21,7 +20,8 @@ threadpool_free (threadpool_t *pool)
   pthread_mutex_destroy (&pool->mtx);
   pthread_cond_destroy (&pool->cond);
 
-  memset (pool, 0, sizeof (threadpool_t));
+  pool->size = 0;
+  pool->threads = NULL;
 }
 
 void
@@ -155,16 +155,16 @@ work (void *arg)
         }
 
       threadpool_task_t *task = pool->head;
-      pool->head = task->next;
-      if (task == pool->tail)
+      if (!(pool->head = task->next))
         pool->tail = NULL;
 
       pthread_mutex_unlock (&pool->mtx);
 
       task->func (task->arg);
-      free (task);
 
       __atomic_fetch_sub (&pool->remain, 1, __ATOMIC_RELEASE);
+
+      free (task);
     }
 
   return NULL;
