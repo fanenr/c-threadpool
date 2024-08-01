@@ -9,7 +9,7 @@ int
 main (void)
 {
   threadpool_t pool;
-  size_t tasks = 100000;
+  size_t tasks = 10000000;
 
   if (0 != threadpool_init (&pool, 16))
     return 1;
