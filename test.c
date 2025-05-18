@@ -15,7 +15,7 @@ main (void)
     return 1;
 
   for (size_t i = 0; i < tasks; i++)
-    if (0 != threadpool_post (&pool, task, (void *)i))
+    if (0 != threadpool_post (&pool, task, (void *) i))
       break;
 
   threadpool_free (&pool);
@@ -25,6 +25,6 @@ main (void)
 static void
 task (void *arg)
 {
-  size_t i = (size_t)arg;
+  size_t i = (size_t) arg;
   __atomic_fetch_add (&counter, 1, __ATOMIC_RELAXED);
 }
